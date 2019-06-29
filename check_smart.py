@@ -122,9 +122,10 @@ class Smart(nagiosplugin.Resource):
         if bits[7]:
             yield nagiosplugin.Metric("warning", {"status": (serial or device, "last sef-test returned errors")}, context="metadata")
     def probe(self):
-        valid_devices = self.list_devices()
-        if not valid_devices:
-            raise nagiosplugin.CheckError("Could not find any device matching {}".format(", ".join(str(_) for _ in self.args.devices)))
+        if not args.load_json:
+            valid_devices = self.list_devices()
+            if not valid_devices:
+                raise nagiosplugin.CheckError("Could not find any device matching {}".format(", ".join(str(_) for _ in self.args.devices)))
         self.metrics = collections.defaultdict(dict)
         state_file = pathlib.Path("/var/tmp") / ".check_smart_{}".format(self.unique_hash)
         if state_file.is_file() and any((state_file.owner() != "root", state_file.group() != "root", (state_file.stat().st_mode & (stat.S_IRWXG|stat.S_IRWXO)) != 0)):
@@ -137,11 +138,16 @@ class Smart(nagiosplugin.Resource):
             except KeyError:
                 yield nagiosplugin.Metric("warning", {"message": "No data in state file {}, first run?".format(state_file)}, context="metadata")
                 self.old_metrics = {}
+        if args.load_json:
+            valid_devices = [None]
         for d in valid_devices:
-            command = ["smartctl", "--json=s", "-x", str(d)]
-            logger.info("Running command: {}".format(" ".join(shlex.quote(_) for _ in command)))
-            p = subprocess.run(command, capture_output=True, universal_newlines=True)
-            smart_data = json.loads(p.stdout)
+            if args.load_json:
+                smart_data = json.load(sys.stdin)
+            else:
+                command = ["smartctl", "--json=s", "-x", str(d)]
+                logger.info("Running command: {}".format(" ".join(shlex.quote(_) for _ in command)))
+                p = subprocess.run(command, capture_output=True, universal_newlines=True)
+                smart_data = json.loads(p.stdout)
             for msg in smart_data["smartctl"].get("messages", []):
                 if msg["severity"] == "error":
                     raise nagiosplugin.CheckError("smartctl returned an error for {}: {}".format(d, msg["string"]))
@@ -222,9 +228,11 @@ def parse_args():
     parser.add_argument("-D", "--devices", help="limit to specific devices", type=pathlib.Path, nargs="+", default=[])
     parser.add_argument("-v", "--verbose", help="enable more verbose output", default=0, action="count")
     parser.add_argument("--retention", help="number of previous values to retain, must be equal to or greater than the max check attempts to let the service enter a hard state", type=int, default=3)
+    # We load from stdin to prevent users from reading any file on the system since the script runs as root
+    parser.add_argument("--load-json", help="load smartctl's JSON output from stdin for debugging purposes", action="store_true", default=False)
     checked_metrics_grp = parser.add_mutually_exclusive_group()
-    checked_metrics_grp.add_argument("--checked-metrics", help="print checked metrics and their values, useful for debugging purposes", action="store_true", default=False)
-    checked_metrics_grp.add_argument("--non-checked-metrics", help="print non-checked metrics and their values, useful for debugging purposes", action="store_true", default=False)
+    checked_metrics_grp.add_argument("--checked-metrics", help="print checked metrics and their values for debugging purposes", action="store_true", default=False)
+    checked_metrics_grp.add_argument("--non-checked-metrics", help="print non-checked metrics and their values for debugging purposes", action="store_true", default=False)
     return parser.parse_args()
 
 @nagiosplugin.guarded
