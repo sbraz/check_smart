@@ -10,8 +10,10 @@ import stat
 import collections
 import pickle
 import hashlib
+import shlex
+import re
 
-logger = logging.getLogger('nagiosplugin')
+logger = logging.getLogger("nagiosplugin")
 
 import nagiosplugin
 
@@ -20,6 +22,7 @@ SCSI_TYPE_DISK = 0x00
 
 class Smart(nagiosplugin.Resource):
     checked_metrics = (
+        'ata_smart_error_log_count',
         'Calibration_Retry_Count',
         'critical_warning',
         'Current_Pending_Sector',
@@ -37,20 +40,28 @@ class Smart(nagiosplugin.Resource):
     def __init__(self, args, unique_hash):
         self.args = args
         self.unique_hash = unique_hash
-    def check_metric(self, serial, metric, value, metrics, old_metrics):
+    def check_metric(self, serial, metric, value, temperature=False):
+        # Ignore all raw temperature metrics because we obtain it from the "Current temperature" section
+        if not temperature and re.match(r"^temperature($|_)", metric, flags=re.I):
+            return
         try:
-            values = old_metrics[serial][metric]
+            values = self.old_metrics[serial][metric]
         except KeyError:
             values = []
         values.append(value)
         if len(values) > self.args.retention:
             values.pop(0)
-        metrics[serial][metric] = values
+        self.metrics[serial][metric] = values
+        metric_str = "[{}] {} = {}".format(serial, metric, value)
         if metric in self.checked_metrics:
+            if self.args.checked_metrics:
+                print(metric_str)
             for i in range(1, len(values)):
                 if values[i] > values[i-1]:
                     yield nagiosplugin.Metric("warning", {"increment": (serial, metric, values[i-1], values[i])}, context="metadata")
-        logger.info("[{}] {} = {}".format(serial, metric, value))
+        elif self.args.non_checked_metrics:
+            print(metric_str)
+        logger.info(metric_str)
         yield nagiosplugin.Metric("{}_{}".format(serial, metric), value, context="smart_attributes")
     def list_devices(self):
         devices = []
@@ -103,7 +114,7 @@ class Smart(nagiosplugin.Resource):
         valid_devices = self.list_devices()
         if not valid_devices:
             raise nagiosplugin.CheckError("Could not find any device matching {}".format(", ".join(str(_) for _ in self.args.devices)))
-        metrics = collections.defaultdict(dict)
+        self.metrics = collections.defaultdict(dict)
         state_file = pathlib.Path("/var/tmp") / ".check_smart_{}".format(self.unique_hash)
         if state_file.is_file() and any((state_file.owner() != "root", state_file.group() != "root", (state_file.stat().st_mode & (stat.S_IRWXG|stat.S_IRWXO)) != 0)):
             raise nagiosplugin.CheckError("Permissions on state file {} are too open".format(state_file))
@@ -111,13 +122,13 @@ class Smart(nagiosplugin.Resource):
         os.umask(0o077)
         with nagiosplugin.Cookie(str(state_file)) as cookie:
             try:
-                old_metrics = cookie["metrics"]
+                self.old_metrics = cookie["metrics"]
             except KeyError:
                 yield nagiosplugin.Metric("warning", {"message": "No data in state file {}, first run?".format(state_file)}, context="metadata")
-                old_metrics = {} 
+                self.old_metrics = {}
         for d in valid_devices:
             command = ["smartctl", "--json=s", "-x", str(d)]
-            logger.info("Running command {}".format(command))
+            logger.info("Running command: {}".format(" ".join(shlex.quote(_) for _ in command)))
             p = subprocess.run(command, capture_output=True, universal_newlines=True)
             smart_data = json.loads(p.stdout)
             for msg in smart_data["smartctl"].get("messages", []):
@@ -129,26 +140,33 @@ class Smart(nagiosplugin.Resource):
             except:
                 serial = None
             yield from self.parse_exit_status(d, serial, smart_data["smartctl"]["exit_status"])
+            # Create a metric based on the number of errors in the log
             if "ata_smart_error_log" in smart_data:
-                yield from self.check_metric(serial, "ata_smart_error_log_count", smart_data["ata_smart_error_log"]["extended"]["count"], metrics, old_metrics)
+                yield from self.check_metric(serial, "ata_smart_error_log_count", smart_data["ata_smart_error_log"]["extended"]["count"])
+            # Parse temperature separately because sometimes the raw value includes "Min/Max" strings and isn't usable
+            try:
+                yield from self.check_metric(serial, "temperature", smart_data["temperature"]["current"], temperature=True)
+            except:
+                pass
+            # Parse all other metrics
             if smart_data["device"]["type"] == "sat":
                 for attr in smart_data["ata_smart_attributes"]["table"]:
-                    yield from self.check_metric(serial, attr["name"], attr["raw"]["value"], metrics, old_metrics)
+                    yield from self.check_metric(serial, attr["name"], attr["raw"]["value"])
             elif smart_data["device"]["type"] == "nvme":
                 for attr, attr_val in smart_data["nvme_smart_health_information_log"].items():
                     if isinstance(attr_val, list):
                         for i, v in enumerate(attr_val):
-                            yield from self.check_metric(serial, "{}_{}".format(attr, i), v, metrics, old_metrics)
+                            yield from self.check_metric(serial, "{}_{}".format(attr, i), v)
                     else:
-                        yield from self.check_metric(serial, attr, attr_val, metrics, old_metrics)
+                        yield from self.check_metric(serial, attr, attr_val)
         with nagiosplugin.Cookie(str(state_file)) as cookie:
-            cookie["metrics"] = metrics
+            cookie["metrics"] = self.metrics
 
 class SmartSummary(nagiosplugin.Summary):
     def ok(self, results):
         return ""
     def verbose(self, results):
-        # We handle verbose outside of the summary 
+        # We handle verbose with the logger, the summary doesn't change based on verbosity
         pass
     def problem(self, results):
         msgs = []
@@ -193,6 +211,9 @@ def parse_args():
     parser.add_argument("-D", "--devices", help="limit to specific devices", type=pathlib.Path, nargs="+", default=[])
     parser.add_argument("-v", "--verbose", help="enable more verbose output", default=0, action="count")
     parser.add_argument("--retention", help="number of previous values to retain, must be equal to or greater than the max check attempts to let the service enter a hard state", type=int, default=3)
+    checked_metrics_grp = parser.add_mutually_exclusive_group()
+    checked_metrics_grp.add_argument("--checked-metrics", help="print checked metrics and their values, useful for debugging purposes", action="store_true", default=False)
+    checked_metrics_grp.add_argument("--non-checked-metrics", help="print non-checked metrics and their values, useful for debugging purposes", action="store_true", default=False)
     return parser.parse_args()
 
 @nagiosplugin.guarded
