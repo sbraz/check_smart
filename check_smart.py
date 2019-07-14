@@ -17,9 +17,6 @@ logger = logging.getLogger("nagiosplugin")
 
 import nagiosplugin
 
-# See https://github.com/torvalds/linux/blob/d1fdb6d8f6a4109a4263176c84b899076a5f8008/include/scsi/scsi_proto.h#L251
-SCSI_TYPE_DISK = 0x00
-
 class Smart(nagiosplugin.Resource):
     checked_metrics = (
         "ata_smart_error_log_count",
@@ -97,7 +94,19 @@ class Smart(nagiosplugin.Resource):
             with (p / "size").open() as f:
                 dev_size = int(f.read())
             dev_path = pathlib.Path("/dev") / p.name
-            if scsi_type == SCSI_TYPE_DISK and dev_size != 0:
+
+            if self.args.skip_removable:
+                try:
+                    with (p / "removable").open() as f:
+                        removable = int(f.read())
+                    if removable == 1:
+                        continue
+                except:
+                    pass
+
+            # SCSI_TYPE_DISK, see
+            # https://github.com/torvalds/linux/blob/d1fdb6d8f6a4109a4263176c84b899076a5f8008/include/scsi/scsi_proto.h#L251
+            if scsi_type == 0x00 and dev_size != 0:
                 # selected_devices_absolute might be empty if some devices were
                 # unresolvable, so we use the non-absolute list in the condition.
                 # Otherwise, a list of unresolvable devices would be the same as
@@ -226,6 +235,7 @@ class MetaDataContext(nagiosplugin.Context):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("-D", "--devices", help="limit to specific devices", type=pathlib.Path, nargs="+", default=[])
+    parser.add_argument("--skip-removable", help="skip removable devices", action="store_true", default=False)
     parser.add_argument("-v", "--verbose", help="enable more verbose output", default=0, action="count")
     parser.add_argument("--retention", help="number of previous values to retain, must be equal to or greater than the max check attempts to let the service enter a hard state", type=int, default=3)
     # We load from stdin to prevent users from reading any file on the system since the script runs as root
