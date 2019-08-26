@@ -57,7 +57,7 @@ class Smart(nagiosplugin.Resource):
         except KeyError:
             values = []
         values.append(value)
-        if len(values) > self.args.retention:
+        if len(values) > (self.args.max_attempts + 1):
             values.pop(0)
         self.metrics[serial][metric] = values
         metric_str = "[{}] {} = {}".format(serial, metric, value)
@@ -237,7 +237,8 @@ def parse_args():
     parser.add_argument("-D", "--devices", help="limit to specific devices", type=pathlib.Path, nargs="+", default=[])
     parser.add_argument("--skip-removable", help="skip removable devices", action="store_true", default=False)
     parser.add_argument("-v", "--verbose", help="enable more verbose output", default=0, action="count")
-    parser.add_argument("--retention", help="number of previous values to retain, must be equal to or greater than the max check attempts to let the service enter a hard state", type=int, default=3)
+    parser.add_argument("--max-attempts", help="number of attempts required for the service to enter a hard state,"
+            " this controls the number of values retained for each counter", type=int, default=4)
     # We load from stdin to prevent users from reading any file on the system since the script runs as root
     parser.add_argument("--load-json", help="load smartctl's JSON output from stdin for debugging purposes", action="store_true", default=False)
     checked_metrics_grp = parser.add_mutually_exclusive_group()
