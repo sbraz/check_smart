@@ -219,7 +219,8 @@ class SmartSummary(nagiosplugin.Summary):
             inc_msgs = []
             for metric, (old, new) in serial_increments.items():
                 inc_msgs.append("{}: {} -> {}".format(metric, old, new))
-            msgs.append("Disk {}: increment in counters {}".format(serial, ", ".join(inc_msgs)))
+            msgs.append("Disk {}: increment in counter{} {}".format(
+                serial, "" if len(inc_msgs) == 1 else "s", ", ".join(inc_msgs)))
         return ", ".join(msgs)
 
 
