@@ -65,7 +65,7 @@ class Smart(nagiosplugin.Resource):
             if self.args.checked_metrics:
                 print(metric_str)
             for i in range(1, len(values)):
-                if values[i] > values[i-1]:
+                if values[i] > values[i-1] and metric not in args.exclude_metric:
                     yield nagiosplugin.Metric("warning", {"increment": (serial, metric, values[i-1], values[i])}, context="metadata")
         elif self.args.non_checked_metrics:
             print(metric_str)
@@ -240,6 +240,8 @@ def parse_args():
     parser.add_argument("-v", "--verbose", help="enable more verbose output", default=0, action="count")
     parser.add_argument("--max-attempts", help="number of attempts required for the service to enter a hard state,"
             " this controls the number of values retained for each counter", type=int, default=4)
+    parser.add_argument("--exclude-metric", action="append", default=[], help="exclude the following metric"
+            " when checking for increments")
     # We load from stdin to prevent users from reading any file on the system since the script runs as root
     parser.add_argument("--load-json", help="load smartctl's JSON output from stdin for debugging purposes", action="store_true", default=False)
     checked_metrics_grp = parser.add_mutually_exclusive_group()
