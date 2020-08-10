@@ -121,7 +121,8 @@ class Smart(nagiosplugin.Resource):
         if bits[1]:
             raise nagiosplugin.CheckError("Device open failed for {}".format(device))
         if bits[2]:
-            yield nagiosplugin.Metric("warning", {"status": (serial or device, "a command failed or a checksum error was found")}, context="metadata")
+            if not self.args.ignore_failing_commands:
+                yield nagiosplugin.Metric("warning", {"status": (serial or device, "a command failed or a checksum error was found")}, context="metadata")
         if bits[3]:
             yield nagiosplugin.Metric("critical", {"status": (serial or device, "in failing state")}, context="metadata")
         if bits[4]:
@@ -242,6 +243,8 @@ def parse_args():
             " this controls the number of values retained for each counter", type=int, default=4)
     parser.add_argument("--exclude-metric", action="append", default=[], help="exclude the following metric"
             " when checking for increments")
+    parser.add_argument("--ignore-failing-commands", help="ignore the second bit of smartctl's exit status, indicating that "
+            "a command failed or a checksum error was found", action="store_true", default=False)
     # We load from stdin to prevent users from reading any file on the system since the script runs as root
     parser.add_argument("--load-json", help="load smartctl's JSON output from stdin for debugging purposes", action="store_true", default=False)
     checked_metrics_grp = parser.add_mutually_exclusive_group()
