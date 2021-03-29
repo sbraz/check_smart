@@ -154,17 +154,28 @@ class Smart(nagiosplugin.Resource):
             yield from _make_status_message("warning", "returned errors during the last self-test")
 
     def _load_cookie(self, state_file):
-        # Make sure that the cookie can't be read by non-root users
-        os.umask(0o077)
+        try:
+            if (state_file.owner(), state_file.group()) != ("root", "root"):
+                raise nagiosplugin.CheckError(
+                    "State file {} is not owned by root:root".format(state_file)
+                )
+            if (state_file.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)) != 0:
+                raise nagiosplugin.CheckError(
+                    "State file {} has group or others permission bits set".format(state_file)
+                )
+        except FileNotFoundError:
+            yield nagiosplugin.Metric(
+                "warning",
+                {"message": "State file {} does not exist, first run?".format(state_file)},
+                context="metadata",
+            )
+            return
         with nagiosplugin.Cookie(str(state_file)) as cookie:
             try:
                 self.old_metrics = cookie["metrics"]
-            except KeyError:
-                yield nagiosplugin.Metric(
-                    "warning",
-                    {"message": "No data in state file {}, first run?".format(state_file)},
-                    context="metadata",
-                )
+                logger.info("Loaded old metrics from %s", state_file)
+            except KeyError as e:
+                raise nagiosplugin.CheckError("No data in state file {}".format(state_file)) from e
 
     def _save_cookie(self, state_file):
         with nagiosplugin.Cookie(str(state_file)) as cookie:
@@ -240,17 +251,10 @@ class Smart(nagiosplugin.Resource):
                 )
         self.metrics = collections.defaultdict(dict)
         state_file = pathlib.Path("/var/tmp") / ".check_smart_{}".format(self.unique_hash)
-        if state_file.is_file() and any(
-            (
-                state_file.owner() != "root",
-                state_file.group() != "root",
-                (state_file.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)) != 0,
-            )
-        ):
-            raise nagiosplugin.CheckError(
-                "Permissions on state file {} are too open".format(state_file)
-            )
-        self._load_cookie(state_file)
+        # Make sure that the cookie can't be read by non-root users
+        # This must be done before trying to open the cookie
+        os.umask(0o077)
+        yield from self._load_cookie(state_file)
         if self.args.load_json:
             valid_devices = [None]
         for dev in valid_devices:
@@ -312,7 +316,7 @@ class MetaDataContext(nagiosplugin.Context):
             return self.result_cls(nagiosplugin.Critical, metric.value)
 
 
-# No traceback display during argiment parsing
+# No traceback display during argument parsing
 @nagiosplugin.guarded(verbose=0)
 def parse_args():
     parser = argparse.ArgumentParser()
