@@ -19,17 +19,40 @@ To check all disks:
 
 To limit to two disks:
 ```
-./check_smart.py -D /dev/sda -D /dev/nvme0n1
+./check_smart.py -D /dev/sda /dev/sdb
+```
+
+Symlinks are also followed, so the following trick can be used
+to make sure we are opening the right device:
+```
+./check_smart.py -D /dev/disk/by-id/ata-*<device serial>
+```
+
+Sometimes, it is desirable to exclude certain counters from alertes:
+```
+./check_smart.py --exclude-metric Raw_Read_Error_Rate
+```
+
+The list of checked and non-checked metrics for a certain device
+can be obtained with:
+```
+./check_smart.py --checked-metrics -D /dev/sda
+./check_smart.py --non-checked-metrics -D /dev/sda
+```
+
+Check the help for all options:
+```
+./check_smart.py -h
 ```
 
 # Requirements
 
 The script requires:
 * Python 3.7 or newer
-* The [`nagiosplugin`](https://nagiosplugin.readthedocs.io) Python module, version 1.2.4 or newer
+* [`nagiosplugin`](https://nagiosplugin.readthedocs.io) version 1.2.4 or newer
 * smartmontools 7.0 or newer (JSON output support)
 * root access (for `smartctl` to work)
-* read-write access to `/var/tmp/` where the state file is created
+* read-write access to `/var/tmp/` (where the state file is created)
 
 # Integration with Icinga
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A Nagios-like plugin to check S.M.A.R.T. status of disks"""
+"""Nagios-like plugin to check S.M.A.R.T. data"""
 import argparse
 import collections
 import hashlib
@@ -360,25 +360,27 @@ def parse_args():
         action="store_true",
         default=False,
     )
-    debugging_options = parser.add_argument_group("Debugging options")
-    # We load from stdin to prevent users from reading any file
+    debugging_options = parser.add_argument_group(
+        "Debugging options", description="These options can be used for debugging purposes"
+    )
+    # Load from stdin to prevent users from reading any file
     # on the system since the script runs as root
     debugging_options.add_argument(
         "--load-json",
-        help="load smartctl's JSON output from stdin for debugging purposes",
+        help="load smartctl's JSON output from stdin",
         action="store_true",
         default=False,
     )
     checked_metrics_grp = debugging_options.add_mutually_exclusive_group()
     checked_metrics_grp.add_argument(
         "--checked-metrics",
-        help="print checked metrics and their values for debugging purposes",
+        help="print checked metrics and their values",
         action="store_true",
         default=False,
     )
     checked_metrics_grp.add_argument(
         "--non-checked-metrics",
-        help="print non-checked metrics and their values for debugging purposes",
+        help="print non-checked metrics and their values",
         action="store_true",
         default=False,
     )
