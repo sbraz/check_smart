@@ -97,9 +97,11 @@ object CheckCommand "smart_metrics" {
   arguments = {
     "--devices" = {
       value = "$smart_metrics_devices$"
+      repeat_key = false
     }
     "--exclude-devices" = {
       value = "$smart_metrics_exclude_devices$"
+      repeat_key = false
     }
     "--skip-removable" = {
       set_if = "$smart_metrics_skip_removable$"
@@ -107,6 +109,7 @@ object CheckCommand "smart_metrics" {
     "--max-attempts" = "$max_check_attempts$"
     "--exclude-metrics" = {
       value = "$smart_metrics_exclude_metrics$"
+      repeat_key = false
     }
     "--ignore-failing-commands" = {
       set_if = "$smart_metrics_ignore_failing_commands$"
