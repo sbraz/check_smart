@@ -65,7 +65,7 @@ class Smart(nagiosplugin.Resource):
         if len(values) > (self.args.max_attempts + 1):
             values.pop(0)
         self.metrics[serial][metric] = values
-        metric_str = "[{}] {} = {}".format(serial, metric, value)
+        metric_str = f"[{serial}] {metric} = {value}"
         if metric in self.checked_metrics:
             if self.args.checked_metrics:
                 print(metric_str)
@@ -79,7 +79,7 @@ class Smart(nagiosplugin.Resource):
         elif self.args.non_checked_metrics:
             print(metric_str)
         logger.info(metric_str)
-        yield nagiosplugin.Metric("{}_{}".format(serial, metric), value, context="smart_attributes")
+        yield nagiosplugin.Metric(f"{serial}_{metric}", value, context="smart_attributes")
 
     def _list_devices(self):
         devices = []
@@ -128,9 +128,9 @@ class Smart(nagiosplugin.Resource):
 
         bits = [(exit_status >> _) & 1 for _ in range(8)]
         if bits[0]:
-            raise nagiosplugin.CheckError("Command line did not parse for {}".format(device))
+            raise nagiosplugin.CheckError(f"Command line did not parse for {device}")
         if bits[1]:
-            raise nagiosplugin.CheckError("Device open failed for {}".format(device))
+            raise nagiosplugin.CheckError(f"Device open failed for {device}")
         if bits[2]:
             if not self.args.ignore_failing_commands:
                 yield from _make_status_message(
@@ -186,7 +186,7 @@ class Smart(nagiosplugin.Resource):
         for msg in smart_data["smartctl"].get("messages", []):
             if msg["severity"] == "error":
                 raise nagiosplugin.CheckError(
-                    "smartctl returned an error for {}: {}".format(device, msg["string"])
+                    f"smartctl returned an error for {device}: {msg['string']}"
                 )
 
     def _handle_other_metrics(self, smart_data, serial):
@@ -197,7 +197,7 @@ class Smart(nagiosplugin.Resource):
             for attr, attr_val in smart_data["nvme_smart_health_information_log"].items():
                 if isinstance(attr_val, list):
                     for i, val in enumerate(attr_val):
-                        yield from self.check_metric(serial, "{}_{}".format(attr, i), val)
+                        yield from self.check_metric(serial, f"{attr}_{i}", val)
                 else:
                     yield from self.check_metric(serial, attr, attr_val)
 
@@ -242,7 +242,7 @@ class Smart(nagiosplugin.Resource):
                     print(f"Found device {dev}")
                 return
         self.metrics = collections.defaultdict(dict)
-        state_file = pathlib.Path("/var/tmp") / ".check_smart_{}".format(self.unique_hash)
+        state_file = pathlib.Path("/var/tmp") / f".check_smart_{self.unique_hash}"
         yield from self._load_cookie(state_file)
         if self.args.load_json:
             valid_devices = [None]
@@ -283,16 +283,13 @@ class SmartSummary(nagiosplugin.Summary):
         for result in sorted(results, key=lambda x: x.state, reverse=True):
             self._handle_result(result, messages, increments, disk_statuses)
         for serial, status_messages in disk_statuses.items():
-            messages.append("Disk {}: {}".format(serial, ", ".join(status_messages)))
+            messages.append(f"Disk {serial}: {', '.join(status_messages)}")
         for serial, serial_increments in increments.items():
             inc_messages = []
             for metric, (old, new) in serial_increments.items():
-                inc_messages.append("{}: {} -> {}".format(metric, old, new))
-            messages.append(
-                "Disk {}: increment in counter{} {}".format(
-                    serial, "" if len(inc_messages) == 1 else "s", ", ".join(inc_messages)
-                )
-            )
+                inc_messages.append(f"{metric}: {old} -> {new}")
+            s = "" if len(inc_messages) == 1 else "s"
+            messages.append(f"Disk {serial}: increment in counter{s} {', '.join(inc_messages)}")
         return ", ".join(messages)
 
 
