@@ -5,12 +5,10 @@ import collections
 import hashlib
 import json
 import logging
-import os
 import pathlib
 import pickle
 import re
 import shlex
-import stat
 import subprocess
 import sys
 
@@ -72,7 +70,7 @@ class Smart(nagiosplugin.Resource):
             if self.args.checked_metrics:
                 print(metric_str)
             for i in range(1, len(values)):
-                if values[i] > values[i - 1] and metric not in self.args.exclude_metric:
+                if values[i] > values[i - 1] and metric not in self.args.exclude_metrics:
                     yield nagiosplugin.Metric(
                         "warning",
                         {"increment": (serial, metric, values[i - 1], values[i])},
@@ -86,13 +84,8 @@ class Smart(nagiosplugin.Resource):
     def _list_devices(self):
         devices = []
         selected_devices_absolute = []
-        for dev in self.args.devices:
-            try:
-                selected_devices_absolute.append(dev.resolve())
-            # Don't raise a RuntimeError if an infinite loop is encountered
-            # to minimize the risk of information leakage
-            except Exception:  # pylint: disable=broad-except
-                pass
+        selected_devices_absolute = [d.resolve() for d in self.args.devices]
+        excluded_devices_absolute = [d.resolve() for d in self.args.exclude_devices]
         for path in pathlib.Path("/sys/block/").iterdir():
             if not (path / "device").is_dir():
                 continue
@@ -119,12 +112,13 @@ class Smart(nagiosplugin.Resource):
             # SCSI_TYPE_DISK, see
             # https://github.com/torvalds/linux/blob/d1fdb6d8/include/scsi/scsi_proto.h#L251
             if scsi_type == 0x00 and dev_size != 0:
-                # selected_devices_absolute might be empty if some devices were
-                # unresolvable, so we use the non-absolute list in the condition.
-                # Otherwise, a list of unresolvable devices would be the same as
-                # no filter at all and we don't want that.
-                if not self.args.devices or dev_path in selected_devices_absolute:
-                    devices.append(dev_path)
+                # Device is excluded
+                if dev_path in excluded_devices_absolute:
+                    continue
+                # There is a list of included devices and this one isn't in it
+                if self.args.devices and dev_path not in selected_devices_absolute:
+                    continue
+                devices.append(dev_path)
         return devices
 
     def _parse_exit_status(self, device, serial, exit_status):
@@ -154,28 +148,16 @@ class Smart(nagiosplugin.Resource):
             yield from _make_status_message("warning", "returned errors during the last self-test")
 
     def _load_cookie(self, state_file):
-        try:
-            if (state_file.owner(), state_file.group()) != ("root", "root"):
-                raise nagiosplugin.CheckError(
-                    "State file {} is not owned by root:root".format(state_file)
-                )
-            if (state_file.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)) != 0:
-                raise nagiosplugin.CheckError(
-                    "State file {} has group or others permission bits set".format(state_file)
-                )
-        except FileNotFoundError:
-            yield nagiosplugin.Metric(
-                "warning",
-                {"message": "State file {} does not exist, first run?".format(state_file)},
-                context="metadata",
-            )
-            return
         with nagiosplugin.Cookie(str(state_file)) as cookie:
             try:
                 self.old_metrics = cookie["metrics"]
                 logger.info("Loaded old metrics from %s", state_file)
-            except KeyError as e:
-                raise nagiosplugin.CheckError("No data in state file {}".format(state_file)) from e
+            except KeyError:
+                yield nagiosplugin.Metric(
+                    "warning",
+                    {"message": f"No data in state file {state_file}, first run?"},
+                    context="metadata",
+                )
 
     def _save_cookie(self, state_file):
         with nagiosplugin.Cookie(str(state_file)) as cookie:
@@ -185,7 +167,7 @@ class Smart(nagiosplugin.Resource):
         if self.args.load_json:
             smart_data = json.load(sys.stdin)
         else:
-            command = ["smartctl", "--json=s", "-x", str(device)]
+            command = ["sudo", "smartctl", "--json=s", "-x", str(device)]
             logger.info("Running command: %s", " ".join(shlex.quote(_) for _ in command))
             proc = subprocess.run(  # pylint: disable=subprocess-run-check
                 command, capture_output=True, universal_newlines=True
@@ -249,11 +231,12 @@ class Smart(nagiosplugin.Resource):
                         ", ".join(str(_) for _ in self.args.devices)
                     )
                 )
+            if self.args.list_devices:
+                for dev in sorted(valid_devices):
+                    print(f"Found device {dev}")
+                return
         self.metrics = collections.defaultdict(dict)
         state_file = pathlib.Path("/var/tmp") / ".check_smart_{}".format(self.unique_hash)
-        # Make sure that the cookie can't be read by non-root users
-        # This must be done before trying to open the cookie
-        os.umask(0o077)
         yield from self._load_cookie(state_file)
         if self.args.load_json:
             valid_devices = [None]
@@ -322,7 +305,8 @@ def parse_args():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter, description=__doc__
     )
-    parser.add_argument(
+    device_group = parser.add_mutually_exclusive_group()
+    device_group.add_argument(
         "-D",
         "--devices",
         help="limit to specific devices",
@@ -330,15 +314,16 @@ def parse_args():
         nargs="+",
         default=[],
     )
-    parser.add_argument(
-        "--skip-removable", help="skip removable devices", action="store_true", default=False
+    device_group.add_argument(
+        "-X",
+        "--exclude-devices",
+        help="exclude the specified devices",
+        type=pathlib.Path,
+        nargs="+",
+        default=[],
     )
     parser.add_argument(
-        "-v",
-        "--verbose",
-        help="enable more verbose output, can be specified multiple times",
-        default=0,
-        action="count",
+        "--skip-removable", help="skip removable devices", action="store_true", default=False
     )
     parser.add_argument(
         "--max-attempts",
@@ -348,10 +333,10 @@ def parse_args():
         default=4,
     )
     parser.add_argument(
-        "--exclude-metric",
-        action="append",
+        "--exclude-metrics",
         default=[],
-        help="exclude the following metric when checking for increments",
+        nargs="+",
+        help="exclude the following metrics when checking for increments",
     )
     parser.add_argument(
         "--ignore-failing-commands",
@@ -363,8 +348,16 @@ def parse_args():
     debugging_options = parser.add_argument_group(
         "Debugging options", description="These options can be used for debugging purposes"
     )
-    # Load from stdin to prevent users from reading any file
-    # on the system since the script runs as root
+    debugging_options.add_argument(
+        "--list-devices", help="list all available devices", action="store_true", default=False
+    )
+    debugging_options.add_argument(
+        "-v",
+        "--verbose",
+        help="enable more verbose output, can be specified multiple times",
+        default=0,
+        action="count",
+    )
     debugging_options.add_argument(
         "--load-json",
         help="load smartctl's JSON output from stdin",
@@ -384,7 +377,10 @@ def parse_args():
         action="store_true",
         default=False,
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.list_devices and (args.devices or args.exclude_devices):
+        parser.error("--list-devices can not be used with -D/--devices or -X/--exclude-devices")
+    return args
 
 
 @nagiosplugin.guarded

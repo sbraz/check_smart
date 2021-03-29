@@ -1,14 +1,40 @@
 # Introduction
 
 This plugin can be used to monitor disks and detect changes in S.M.A.R.T. metrics.
-It checks two things:
-* The status of all smart metrics and whether they are in a failing state.
-* Increments in critical counters such as read errors.
 
-By default, the script checks all devices present on the system and
+## Features
+* Checks the status of all smart metrics and whether they are in a failing state
+* Checks increments in critical counters such as read errors
+* Outputs performance data for all attributes
+
+By default, the script checks all disks present on the system and
 retains values over the last 4 runs. This means that in case a critical
 metric sees an increase, the check will return a warning 4 times.
 After the fifth run, the increment will no longer be detected.
+
+
+# Requirements
+
+The script requires:
+* Python 3.7 or newer
+* [`nagiosplugin`](https://nagiosplugin.readthedocs.io) version 1.2.4 or newer
+* smartmontools 7.0 or newer (JSON output support)
+* sudo and access to `smartctl --json=s -x` commands, see [the related section](#security)
+* read-write access to `/var/tmp/` (where the state file is created)
+
+# <a name="security"></a> Security considerations
+
+In order to limit as much as possible the attack surface, it is recommended to
+only grant root access to the required `smartctl` commands.
+
+For example, create `/etc/sudoders.d/check_smart` containing:
+```
+icinga ALL=(ALL) NOPASSWD: /usr/sbin/smartctl --json=s -x /dev/sd[a-z]
+icinga ALL=(ALL) NOPASSWD: /usr/sbin/smartctl --json=s -x /dev/sd[a-z][a-z]
+icinga ALL=(ALL) NOPASSWD: /usr/sbin/smartctl --json=s -x /dev/nvme[0-9]n[0-9]
+```
+
+This should be enough to make the check work with most configurations.
 
 # Usage
 
@@ -17,15 +43,32 @@ To check all disks:
 ./check_smart.py
 ```
 
+To list all available disks:
+```
+./check_smart.py --list-devices
+```
+
 To limit to two disks:
 ```
 ./check_smart.py -D /dev/sda /dev/sdb
 ```
 
 Symlinks are also followed, so the following trick can be used
-to make sure we are opening the right device:
+to make sure we are opening the same disk across reboots:
 ```
 ./check_smart.py -D /dev/disk/by-id/ata-*<device serial>
+```
+
+To exclude a disk:
+```
+./check_smart.py -X /dev/sda
+```
+
+It is possible to change the number of check attempts before an increment in a
+checked counter stops being reported as an error. The following will cause
+the check to return an error only once. All subsequent runs will be fine.
+```
+./check_smart.py --max-attempts 1
 ```
 
 Sometimes, it is desirable to exclude certain counters from alertes:
@@ -45,32 +88,28 @@ Check the help for all options:
 ./check_smart.py -h
 ```
 
-# Requirements
-
-The script requires:
-* Python 3.7 or newer
-* [`nagiosplugin`](https://nagiosplugin.readthedocs.io) version 1.2.4 or newer
-* smartmontools 7.0 or newer (JSON output support)
-* root access (for `smartctl` to work)
-* read-write access to `/var/tmp/` (where the state file is created)
-
 # Integration with Icinga
 
 An Icinga `CheckCommand` can be defined with:
 ```
 object CheckCommand "smart_metrics" {
-  command = ["sudo", PluginDir + "/check_smart.py"]
+  command = [PluginDir + "/check_smart.py"]
   arguments = {
-    "--max-attempts" = "$max_check_attempts$"
+    "--devices" = {
+      value = "$smart_metrics_devices$"
+    }
+    "--exclude-devices" = {
+      value = "$smart_metrics_exclude_devices$"
+    }
     "--skip-removable" = {
       set_if = "$smart_metrics_skip_removable$"
     }
+    "--max-attempts" = "$max_check_attempts$"
+    "--exclude-metrics" = {
+      value = "$smart_metrics_exclude_metrics$"
+    }
     "--ignore-failing-commands" = {
       set_if = "$smart_metrics_ignore_failing_commands$"
-    }
-    "--exclude-metric" = {
-      value = "$smart_metrics_exclude_metric$"
-      repeat_key = true
     }
   }
   vars.smart_metrics_skip_removable = true
