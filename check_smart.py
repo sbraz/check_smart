@@ -1,5 +1,5 @@
-#!/usr/bin/env python3.7
-"""A Nagios-like plugin to check devices' SMART status"""
+#!/usr/bin/env python3
+"""A Nagios-like plugin to check S.M.A.R.T. status of disks"""
 import argparse
 import collections
 import hashlib
@@ -319,7 +319,9 @@ class MetaDataContext(nagiosplugin.Context):
 # No traceback display during argument parsing
 @nagiosplugin.guarded(verbose=0)
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter, description=__doc__
+    )
     parser.add_argument(
         "-D",
         "--devices",
@@ -332,7 +334,11 @@ def parse_args():
         "--skip-removable", help="skip removable devices", action="store_true", default=False
     )
     parser.add_argument(
-        "-v", "--verbose", help="enable more verbose output", default=0, action="count"
+        "-v",
+        "--verbose",
+        help="enable more verbose output, can be specified multiple times",
+        default=0,
+        action="count",
     )
     parser.add_argument(
         "--max-attempts",
@@ -354,15 +360,16 @@ def parse_args():
         action="store_true",
         default=False,
     )
+    debugging_options = parser.add_argument_group("Debugging options")
     # We load from stdin to prevent users from reading any file
     # on the system since the script runs as root
-    parser.add_argument(
+    debugging_options.add_argument(
         "--load-json",
         help="load smartctl's JSON output from stdin for debugging purposes",
         action="store_true",
         default=False,
     )
-    checked_metrics_grp = parser.add_mutually_exclusive_group()
+    checked_metrics_grp = debugging_options.add_mutually_exclusive_group()
     checked_metrics_grp.add_argument(
         "--checked-metrics",
         help="print checked metrics and their values for debugging purposes",
