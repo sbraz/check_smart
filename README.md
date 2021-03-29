@@ -24,8 +24,8 @@ The script requires:
 
 # <a name="security"></a> Security considerations
 
-In order to limit as much as possible the attack surface, it is recommended to
-only grant root access to the required `smartctl` commands.
+In order to limit the attack surface as much as possible, it is recommended to
+only grant sudo access to the required `smartctl` commands.
 
 For example, create `/etc/sudoders.d/check_smart` containing:
 ```
@@ -53,7 +53,7 @@ To limit to two disks:
 ./check_smart.py -D /dev/sda /dev/sdb
 ```
 
-Symlinks are also followed, so the following trick can be used
+Symlinks are also resolved, so the following trick can be used
 to make sure we are opening the same disk across reboots:
 ```
 ./check_smart.py -D /dev/disk/by-id/ata-*<device serial>
@@ -71,7 +71,7 @@ the check to return an error only once. All subsequent runs will be fine.
 ./check_smart.py --max-attempts 1
 ```
 
-Sometimes, it is desirable to exclude certain counters from alertes:
+Sometimes, it is desirable to exclude certain counters from alerts:
 ```
 ./check_smart.py --exclude-metric Raw_Read_Error_Rate
 ```
@@ -83,7 +83,7 @@ can be obtained with:
 ./check_smart.py --non-checked-metrics -D /dev/sda
 ```
 
-Check the help for all options:
+Check the help for a description of all avaliable options:
 ```
 ./check_smart.py -h
 ```
