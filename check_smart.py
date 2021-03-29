@@ -83,7 +83,7 @@ class Smart(nagiosplugin.Resource):
         logger.info(metric_str)
         yield nagiosplugin.Metric("{}_{}".format(serial, metric), value, context="smart_attributes")
 
-    def list_devices(self):
+    def _list_devices(self):
         devices = []
         selected_devices_absolute = []
         for dev in self.args.devices:
@@ -127,7 +127,11 @@ class Smart(nagiosplugin.Resource):
                     devices.append(dev_path)
         return devices
 
-    def parse_exit_status(self, device, serial, exit_status):
+    def _parse_exit_status(self, device, serial, exit_status):
+        def _make_status_message(status, message):
+            info = (serial or device, message)
+            return nagiosplugin.Metric(status, {"status": info}, context="metadata")
+
         bits = [(exit_status >> _) & 1 for _ in range(8)]
         if bits[0]:
             raise nagiosplugin.CheckError("Command line did not parse for {}".format(device))
@@ -135,43 +139,19 @@ class Smart(nagiosplugin.Resource):
             raise nagiosplugin.CheckError("Device open failed for {}".format(device))
         if bits[2]:
             if not self.args.ignore_failing_commands:
-                yield nagiosplugin.Metric(
-                    "warning",
-                    {
-                        "status": (
-                            serial or device,
-                            "a command failed or a checksum error was found",
-                        )
-                    },
-                    context="metadata",
+                yield from _make_status_message(
+                    "warning", "a command failed or a checksum error was found"
                 )
         if bits[3]:
-            yield nagiosplugin.Metric(
-                "critical", {"status": (serial or device, "in failing state")}, context="metadata"
-            )
+            yield from _make_status_message("critical", "is in failing state")
         if bits[4]:
-            yield nagiosplugin.Metric(
-                "critical",
-                {"status": (serial or device, "has prefail attributes below threshold")},
-                context="metadata",
-            )
+            yield from _make_status_message("critical", "has prefail attributes below threshold")
         if bits[5]:
-            yield nagiosplugin.Metric(
-                "warning",
-                {
-                    "status": (
-                        serial or device,
-                        "had prefail attributes below threshold at some point",
-                    )
-                },
-                context="metadata",
+            yield from _make_status_message(
+                "warning", "had prefail attributes below threshold at some point"
             )
         if bits[7]:
-            yield nagiosplugin.Metric(
-                "warning",
-                {"status": (serial or device, "last sef-test returned errors")},
-                context="metadata",
-            )
+            yield from _make_status_message("warning", "returned errors during the last self-test")
 
     def _load_cookie(self, state_file):
         # Make sure that the cookie can't be read by non-root users
@@ -230,7 +210,7 @@ class Smart(nagiosplugin.Resource):
             serial = smart_data["serial_number"].replace("_", "-")
         except KeyError:
             serial = None
-        yield from self.parse_exit_status(device, serial, smart_data["smartctl"]["exit_status"])
+        yield from self._parse_exit_status(device, serial, smart_data["smartctl"]["exit_status"])
         # Create a metric based on the number of errors in the log
         if "ata_smart_error_log" in smart_data:
             yield from self.check_metric(
@@ -251,7 +231,7 @@ class Smart(nagiosplugin.Resource):
 
     def probe(self):
         if not self.args.load_json:
-            valid_devices = self.list_devices()
+            valid_devices = self._list_devices()
             if not valid_devices:
                 raise nagiosplugin.CheckError(
                     "Could not find any device matching {}".format(
