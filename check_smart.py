@@ -172,7 +172,13 @@ class Smart(nagiosplugin.Resource):
             proc = subprocess.run(  # pylint: disable=subprocess-run-check
                 command, capture_output=True, universal_newlines=True
             )
-            smart_data = json.loads(proc.stdout)
+            try:
+                smart_data = json.loads(proc.stdout)
+            except json.JSONDecodeError as e:
+                raise nagiosplugin.CheckError(
+                    f"Failed to decode smartctl's JSON output: {proc.stdout!r};"
+                    f" stderr: {proc.stderr!r}"
+                ) from e
         return smart_data
 
     @classmethod
