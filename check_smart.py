@@ -173,6 +173,82 @@ class Smart(nagiosplugin.Resource):
                 context="metadata",
             )
 
+    def _load_cookie(self, state_file):
+        # Make sure that the cookie can't be read by non-root users
+        os.umask(0o077)
+        with nagiosplugin.Cookie(str(state_file)) as cookie:
+            try:
+                self.old_metrics = cookie["metrics"]
+            except KeyError:
+                yield nagiosplugin.Metric(
+                    "warning",
+                    {"message": "No data in state file {}, first run?".format(state_file)},
+                    context="metadata",
+                )
+
+    def _save_cookie(self, state_file):
+        with nagiosplugin.Cookie(str(state_file)) as cookie:
+            cookie["metrics"] = self.metrics
+
+    def _get_device_smart_data(self, device):
+        if self.args.load_json:
+            smart_data = json.load(sys.stdin)
+        else:
+            command = ["smartctl", "--json=s", "-x", str(device)]
+            logger.info("Running command: %s", " ".join(shlex.quote(_) for _ in command))
+            proc = subprocess.run(  # pylint: disable=subprocess-run-check
+                command, capture_output=True, universal_newlines=True
+            )
+            smart_data = json.loads(proc.stdout)
+        return smart_data
+
+    @classmethod
+    def _handle_smart_messages(cls, device, smart_data):
+        for msg in smart_data["smartctl"].get("messages", []):
+            if msg["severity"] == "error":
+                raise nagiosplugin.CheckError(
+                    "smartctl returned an error for {}: {}".format(device, msg["string"])
+                )
+
+    def _handle_other_metrics(self, smart_data, serial):
+        if smart_data["device"]["type"] == "sat":
+            for attr in smart_data["ata_smart_attributes"]["table"]:
+                yield from self.check_metric(serial, attr["name"], attr["raw"]["value"])
+        elif smart_data["device"]["type"] == "nvme":
+            for attr, attr_val in smart_data["nvme_smart_health_information_log"].items():
+                if isinstance(attr_val, list):
+                    for i, val in enumerate(attr_val):
+                        yield from self.check_metric(serial, "{}_{}".format(attr, i), val)
+                else:
+                    yield from self.check_metric(serial, attr, attr_val)
+
+    def _probe_device(self, device):
+        smart_data = self._get_device_smart_data(device)
+        self._handle_smart_messages(device, smart_data)
+        # We want to be able to split perfdata on the first underscore to extract the serial
+        try:
+            serial = smart_data["serial_number"].replace("_", "-")
+        except KeyError:
+            serial = None
+        yield from self.parse_exit_status(device, serial, smart_data["smartctl"]["exit_status"])
+        # Create a metric based on the number of errors in the log
+        if "ata_smart_error_log" in smart_data:
+            yield from self.check_metric(
+                serial,
+                "ata_smart_error_log_count",
+                smart_data["ata_smart_error_log"]["extended"]["count"],
+            )
+        # Parse temperature separately because sometimes
+        # the raw value includes "Min/Max" strings and isn't usable
+        try:
+            yield from self.check_metric(
+                serial, "temperature", smart_data["temperature"]["current"], temperature=True
+            )
+        except Exception:  # pylint: disable=broad-except
+            pass
+        # Parse all other metrics
+        yield from self._handle_other_metrics(smart_data, serial)
+
     def probe(self):
         if not self.args.load_json:
             valid_devices = self.list_devices()
@@ -194,68 +270,12 @@ class Smart(nagiosplugin.Resource):
             raise nagiosplugin.CheckError(
                 "Permissions on state file {} are too open".format(state_file)
             )
-        # Make sure that the cookie can't be read by non-root users
-        os.umask(0o077)
-        with nagiosplugin.Cookie(str(state_file)) as cookie:
-            try:
-                self.old_metrics = cookie["metrics"]
-            except KeyError:
-                yield nagiosplugin.Metric(
-                    "warning",
-                    {"message": "No data in state file {}, first run?".format(state_file)},
-                    context="metadata",
-                )
+        self._load_cookie(state_file)
         if self.args.load_json:
             valid_devices = [None]
         for dev in valid_devices:
-            if self.args.load_json:
-                smart_data = json.load(sys.stdin)
-            else:
-                command = ["smartctl", "--json=s", "-x", str(dev)]
-                logger.info("Running command: %s", " ".join(shlex.quote(_) for _ in command))
-                proc = subprocess.run(  # pylint: disable=subprocess-run-check
-                    command, capture_output=True, universal_newlines=True
-                )
-                smart_data = json.loads(proc.stdout)
-            for msg in smart_data["smartctl"].get("messages", []):
-                if msg["severity"] == "error":
-                    raise nagiosplugin.CheckError(
-                        "smartctl returned an error for {}: {}".format(dev, msg["string"])
-                    )
-            # We want to be able to split perfdata on the first underscore to extract the serial
-            try:
-                serial = smart_data["serial_number"].replace("_", "-")
-            except KeyError:
-                serial = None
-            yield from self.parse_exit_status(dev, serial, smart_data["smartctl"]["exit_status"])
-            # Create a metric based on the number of errors in the log
-            if "ata_smart_error_log" in smart_data:
-                yield from self.check_metric(
-                    serial,
-                    "ata_smart_error_log_count",
-                    smart_data["ata_smart_error_log"]["extended"]["count"],
-                )
-            # Parse temperature separately because sometimes
-            # the raw value includes "Min/Max" strings and isn't usable
-            try:
-                yield from self.check_metric(
-                    serial, "temperature", smart_data["temperature"]["current"], temperature=True
-                )
-            except Exception:  # pylint: disable=broad-except
-                pass
-            # Parse all other metrics
-            if smart_data["device"]["type"] == "sat":
-                for attr in smart_data["ata_smart_attributes"]["table"]:
-                    yield from self.check_metric(serial, attr["name"], attr["raw"]["value"])
-            elif smart_data["device"]["type"] == "nvme":
-                for attr, attr_val in smart_data["nvme_smart_health_information_log"].items():
-                    if isinstance(attr_val, list):
-                        for i, val in enumerate(attr_val):
-                            yield from self.check_metric(serial, "{}_{}".format(attr, i), val)
-                    else:
-                        yield from self.check_metric(serial, attr, attr_val)
-        with nagiosplugin.Cookie(str(state_file)) as cookie:
-            cookie["metrics"] = self.metrics
+            yield from self._probe_device(dev)
+        self._save_cookie(state_file)
 
 
 class SmartSummary(nagiosplugin.Summary):
@@ -341,7 +361,7 @@ def parse_args():
         "--exclude-metric",
         action="append",
         default=[],
-        help="exclude the following metric" " when checking for increments",
+        help="exclude the following metric when checking for increments",
     )
     parser.add_argument(
         "--ignore-failing-commands",
