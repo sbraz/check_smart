@@ -167,7 +167,7 @@ class Smart(nagiosplugin.Resource):
         if self.args.load_json:
             smart_data = json.load(sys.stdin)
         else:
-            command = ["sudo", "smartctl", "--json=s", "-x", str(device)]
+            command = ["sudo", "-n", "smartctl", "--json=s", "-x", str(device)]
             logger.info("Running command: %s", " ".join(shlex.quote(_) for _ in command))
             proc = subprocess.run(  # pylint: disable=subprocess-run-check
                 command, capture_output=True, universal_newlines=True
