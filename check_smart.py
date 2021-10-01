@@ -233,11 +233,8 @@ class Smart(nagiosplugin.Resource):
         if not self.args.load_json:
             valid_devices = self._list_devices()
             if not valid_devices:
-                raise nagiosplugin.CheckError(
-                    "Could not find any device matching {}".format(
-                        ", ".join(str(_) for _ in self.args.devices)
-                    )
-                )
+                devices = ", ".join(str(_) for _ in self.args.devices)
+                raise nagiosplugin.CheckError(f"Could not find any device matching {devices}")
             if self.args.list_devices:
                 for dev in sorted(valid_devices):
                     print(f"Found device {dev}")
