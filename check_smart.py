@@ -69,13 +69,14 @@ class Smart(nagiosplugin.Resource):
         if metric in self.checked_metrics:
             if self.args.checked_metrics:
                 print(metric_str)
-            for i in range(1, len(values)):
-                if values[i] > values[i - 1] and metric not in self.args.exclude_metrics:
-                    yield nagiosplugin.Metric(
-                        "warning",
-                        {"increment": (serial, metric, values[i - 1], values[i])},
-                        context="metadata",
-                    )
+            first_value = values[0]
+            max_value = max(values)
+            if max_value > first_value and metric not in self.args.exclude_metrics:
+                yield nagiosplugin.Metric(
+                    "warning",
+                    {"increment": (serial, metric, first_value, max_value)},
+                    context="metadata",
+                )
         elif self.args.non_checked_metrics:
             print(metric_str)
         logger.info(metric_str)
