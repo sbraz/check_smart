@@ -134,19 +134,19 @@ class Smart(nagiosplugin.Resource):
             raise nagiosplugin.CheckError(f"Device open failed for {device}")
         if bits[2]:
             if not self.args.ignore_failing_commands:
-                yield from _make_status_message(
+                yield _make_status_message(
                     "warning", "a command failed or a checksum error was found"
                 )
         if bits[3]:
-            yield from _make_status_message("critical", "is in failing state")
+            yield _make_status_message("critical", "is in failing state")
         if bits[4]:
-            yield from _make_status_message("critical", "has prefail attributes below threshold")
+            yield _make_status_message("critical", "has prefail attributes below threshold")
         if bits[5]:
-            yield from _make_status_message(
+            yield _make_status_message(
                 "warning", "had prefail attributes below threshold at some point"
             )
         if bits[7]:
-            yield from _make_status_message("warning", "returned errors during the last self-test")
+            yield _make_status_message("warning", "returned errors during the last self-test")
 
     def _load_cookie(self, state_file):
         with nagiosplugin.Cookie(str(state_file)) as cookie:
