@@ -31,7 +31,6 @@ class Smart(nagiosplugin.Resource):
         "Load_Retry_Count",
         "media_errors",
         "Multi_Zone_Error_Rate",
-        "num_err_log_entries",
         "Offline_Uncorrectable",
         "Program_Fail_Cnt_Total",
         "Raw_Read_Error_Rate",
