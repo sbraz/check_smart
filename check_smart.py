@@ -18,7 +18,7 @@ logger = logging.getLogger("nagiosplugin")
 
 
 class Smart(nagiosplugin.Resource):
-    checked_metrics = (
+    CHECKED_METRICS = (
         "ata_smart_error_log_count",
         "Calibration_Retry_Count",
         "critical_comp_time",
@@ -44,6 +44,15 @@ class Smart(nagiosplugin.Resource):
         "Used_Rsvd_Blk_Cnt_Tot",
         "warning_temp_time",
     )
+    CHECK_EXCLUSIONS = [
+        {
+            "match": {"model_family": "Seagate Exos X16"},
+            "metrics": [
+                "Raw_Read_Error_Rate",
+                "Seek_Error_Rate",
+            ],
+        }
+    ]
 
     def __init__(self, args, unique_hash):
         self.args = args
@@ -51,7 +60,22 @@ class Smart(nagiosplugin.Resource):
         self.metrics = {}
         self.old_metrics = {}
 
-    def check_metric(self, serial, metric, value, temperature=False):
+    def _exclude_metric(self, serial, smart_data, metric):
+        for exclusion in self.CHECK_EXCLUSIONS:
+            for key, value in exclusion["match"].items():
+                if smart_data.get(key) == value and metric in exclusion["metrics"]:
+                    logger.debug(
+                        "[%s] Ignoring increment in metric %s because %s = %s",
+                        serial,
+                        metric,
+                        key,
+                        value,
+                    )
+                    return True
+        return False
+
+    def check_metric(self, smart_data, serial, metric, value, temperature=False):
+        # pylint: disable=too-many-arguments
         # Ignore all raw temperature metrics because
         # we obtain them from the "Current temperature" section
         if not temperature and re.match(r"^temperature($|_)", metric, flags=re.I):
@@ -65,12 +89,12 @@ class Smart(nagiosplugin.Resource):
             values.pop(0)
         self.metrics[serial][metric] = values
         metric_str = f"[{serial}] {metric} = {value}"
-        if metric in self.checked_metrics:
+        if metric in self.CHECKED_METRICS:
             if self.args.checked_metrics:
                 print(metric_str)
             first_value = values[0]
             max_value = max(values)
-            if max_value > first_value and metric not in self.args.exclude_metrics:
+            if max_value > first_value and not self._exclude_metric(serial, smart_data, metric):
                 yield nagiosplugin.Metric(
                     "warning",
                     {"increment": (serial, metric, first_value, max_value)},
@@ -192,14 +216,14 @@ class Smart(nagiosplugin.Resource):
     def _handle_other_metrics(self, smart_data, serial):
         if smart_data["device"]["type"] == "sat":
             for attr in smart_data["ata_smart_attributes"]["table"]:
-                yield from self.check_metric(serial, attr["name"], attr["raw"]["value"])
+                yield from self.check_metric(smart_data, serial, attr["name"], attr["raw"]["value"])
         elif smart_data["device"]["type"] == "nvme":
             for attr, attr_val in smart_data["nvme_smart_health_information_log"].items():
                 if isinstance(attr_val, list):
                     for i, val in enumerate(attr_val):
-                        yield from self.check_metric(serial, f"{attr}_{i}", val)
+                        yield from self.check_metric(smart_data, serial, f"{attr}_{i}", val)
                 else:
-                    yield from self.check_metric(serial, attr, attr_val)
+                    yield from self.check_metric(smart_data, serial, attr, attr_val)
 
     def _probe_device(self, device):
         smart_data = self._get_device_smart_data(device)
@@ -213,6 +237,7 @@ class Smart(nagiosplugin.Resource):
         # Create a metric based on the number of errors in the log
         if "ata_smart_error_log" in smart_data:
             yield from self.check_metric(
+                smart_data,
                 serial,
                 "ata_smart_error_log_count",
                 smart_data["ata_smart_error_log"]["extended"]["count"],
@@ -221,7 +246,11 @@ class Smart(nagiosplugin.Resource):
         # the raw value includes "Min/Max" strings and isn't usable
         try:
             yield from self.check_metric(
-                serial, "temperature", smart_data["temperature"]["current"], temperature=True
+                smart_data,
+                serial,
+                "temperature",
+                smart_data["temperature"]["current"],
+                temperature=True,
             )
         except Exception:  # pylint: disable=broad-except
             pass
