@@ -114,6 +114,9 @@ object CheckCommand "smart_metrics" {
     "--ignore-failing-commands" = {
       set_if = "$smart_metrics_ignore_failing_commands$"
     }
+    "--ignore-error-message" = {
+        value = "$smart_metrics_ignore_error_message$"
+    }
   }
   vars.smart_metrics_skip_removable = true
 }

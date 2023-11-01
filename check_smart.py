@@ -205,10 +205,9 @@ class Smart(nagiosplugin.Resource):
                 ) from e
         return smart_data
 
-    @classmethod
-    def _handle_smart_messages(cls, device, smart_data):
+    def _handle_smart_messages(self, device, smart_data):
         for msg in smart_data["smartctl"].get("messages", []):
-            if msg["severity"] == "error":
+            if msg["severity"] == "error" and msg["string"] not in self.args.ignore_error_message:
                 raise nagiosplugin.CheckError(
                     f"smartctl returned an error for {device}: {msg['string']}"
                 )
@@ -373,6 +372,13 @@ def parse_args():
         "a command failed or a checksum error was found",
         action="store_true",
         default=False,
+    )
+    parser.add_argument(
+        "--ignore-error-message",
+        help="ignore error messages equal to %(metavar)",
+        metavar="MSG",
+        nargs="*",
+        default=[],
     )
     debugging_options = parser.add_argument_group(
         "Debugging options", description="These options can be used for debugging purposes"
