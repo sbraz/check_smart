@@ -51,7 +51,14 @@ class Smart(nagiosplugin.Resource):
                 "Raw_Read_Error_Rate",
                 "Seek_Error_Rate",
             ],
-        }
+        },
+        {
+            "match": {"model_family": "Seagate Exos X18"},
+            "metrics": [
+                "Raw_Read_Error_Rate",
+                "Seek_Error_Rate",
+            ],
+        },
     ]
 
     def __init__(self, args, unique_hash):
