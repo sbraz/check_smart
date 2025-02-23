@@ -82,7 +82,7 @@ class Smart(nagiosplugin.Resource):
         return False
 
     def check_metric(self, smart_data, serial, metric, value, temperature=False):
-        # pylint: disable=too-many-arguments
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
         # Ignore all raw temperature metrics because
         # we obtain them from the "Current temperature" section
         if not temperature and re.match(r"^temperature($|_)", metric, flags=re.I):
