@@ -16,7 +16,7 @@ After the fifth run, the increment will no longer be detected.
 # Requirements
 
 The script requires:
-* Python 3.7 or newer
+* Python 3.10 or newer
 * [`nagiosplugin`](https://nagiosplugin.readthedocs.io) version 1.2.4 or newer
 * smartmontools 7.0 or newer (JSON output support)
 * sudo and access to `smartctl --json=s -x` commands, see [the related section](#security)
