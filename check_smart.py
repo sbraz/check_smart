@@ -382,7 +382,7 @@ def parse_args():
     )
     parser.add_argument(
         "--ignore-error-message",
-        help="ignore error messages equal to %(metavar)",
+        help="ignore error messages equal to %(metavar)s",
         metavar="MSG",
         nargs="*",
         default=[],
