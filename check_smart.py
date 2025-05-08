@@ -435,7 +435,7 @@ def main(args):
     args_hash = hashlib.sha1(pickle.dumps(relevant_args)).hexdigest()
     check = nagiosplugin.Check(
         Smart(args, args_hash),
-        nagiosplugin.ScalarContext("smart_attributes"),
+        nagiosplugin.ScalarContext("smart_attributes", warning="~:", critical="~:"),
         MetaDataContext("metadata"),
         SmartSummary(),
     )
